@@ -6,10 +6,15 @@
 Test building an index.
 """
 
-import logging, seqan, sys
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+import seqan
+import sys
 from . import fasta_file
-from copy import copy
 from itertools import groupby, imap, chain
+import cacto
 
 
 def is_known(x):
@@ -18,16 +23,16 @@ def is_known(x):
 
 def split_sequence(seq):
     """Split a sequence into those sections that are known bases."""
-    logging.info('Splitting: %s', seq)
+    logger.info('Splitting: %s', seq)
     for k, g in groupby(seq, is_known):
         if k:
             yield ''.join(imap(str, g))
 
 
 def test_split_sequence():
-    logging.info(sys._getframe().f_code.co_name)
+    logger.info(sys._getframe().f_code.co_name)
 
-    result = list(split_sequence(seqan.StringDna5('NNACNGANGGN')))
+    result = list(split_sequence(seqan.StringDNA5('NNACNGANGGN')))
     assert result[0] == 'AC', result[0]
     assert result[1] == 'GA', result[1]
     assert result[2] == 'GG', result[2]
@@ -41,22 +46,22 @@ def test_split_sequence():
 
 def read_sequences(fasta):
     # Read and reverse the sequences
-    num_bases, seqs_dna5, _ids = seqan.readFastaDna5(fasta, reverse=True)
+    num_bases, seqs_dna5, _ids = seqan.readFastaDNA5(fasta, reverse=True)
     for _id, seq in zip(_ids, seqs_dna5):
-        logging.info('%s: %d bases', _id, len(seq))
-    logging.info('Read %d bases in total', num_bases)
+        logger.info('%s: %d bases', _id, len(seq))
+    logger.info('Read %d bases in total', num_bases)
 
     # Split the sequences into their known portions
-    seqs_dna4 = seqan.StringDnaSet()
+    seqs_dna4 = seqan.StringDNASet()
     for seq in chain.from_iterable(imap(split_sequence, seqs_dna5)):
-        logging.info(seq)
-        seqs_dna4.appendValue(seqan.StringDna(seq))
-    logging.info('Split %d sequences with %d possibly ambiguous bases into %d sections totalling %d unambiguous bases',
+        logger.info(seq)
+        seqs_dna4.appendValue(seqan.StringDNA(seq))
+    logger.info('Split %d sequences with %d possibly ambiguous bases into %d sections totalling %d unambiguous bases',
                 len(seqs_dna5), num_bases, len(seqs_dna4), sum(imap(len, seqs_dna4)))
 
 
 def test_read_sequences():
-    logging.info(sys._getframe().f_code.co_name)
+    logger.info(sys._getframe().f_code.co_name)
     read_sequences(fasta_file('dm01r.fasta'))
 
 
@@ -74,7 +79,7 @@ def _count_contexts_descend(index, context_counts, i, loglevel=0):
             count_contexts(index, context_counts, copy(i))
             if not i.goRight():
                 break
-    logging.log(
+    logger.log(
         loglevel,
         '%10s has %2d child occurrences',
         quote(representative),
@@ -93,8 +98,8 @@ def find_context(index, i):
     base = i.representative[0]
     context = i.representative[1:]
     context_i = index.TopDownIterator(index)
-    #logging.debug('Finding context "%s" for base %s', context, base)
-    if context_i.goDownStr(context):
+    #logger.debug('Finding context "%s" for base %s', context, base)
+    if context_i.goDown(context):
         return base, context_i
 
 
@@ -109,11 +114,11 @@ def count_contexts(index, context_counts, i):
         found_context = find_context(index, i)
         assert found_context
         base, context_i = found_context
-        #logging.debug('Context %5s; base %s',
+        #logger.debug('Context %5s; base %s',
             #quote(context_i.representative), base)
 
         # Update counts, index by context's id then by the base value that follows
-        #logging.debug('Context %5s has %2d occurrences and %2d child occurrences',
+        #logger.debug('Context %5s has %2d occurrences and %2d child occurrences',
                     #quote(context_i.representative),
                     #context_i.countOccurrences,
                     #child_occurrences)
@@ -121,7 +126,7 @@ def count_contexts(index, context_counts, i):
         if counts > 0:
             context_counts[context_i.value,base.ordValue] = counts
 #         if len(i.representative) < 3:
-#             logging.info('%-2s : %5d', i.representative, i.countOccurrences)
+#             logger.info('%-2s : %5d', i.representative, i.countOccurrences)
 
 
 
@@ -137,60 +142,136 @@ def show_contexts(index, context_counts, i):
     # as are only interested in leaf occurrences of this node
     for (vertex, base), count in context_counts.iteritems():
         i = index.TopDownIterator(index, vertex)
-        logging.info(
+        logger.info(
             'Context %10s is followed by %s %3d times',
             quote(str(i.representative)[::-1]), 'ACGT'[base], count)
-    return
-
-    if i.goDown():
-        while True:
-            found_context = find_context(index, i)
-            assert found_context
-            base, context_i = found_context
-            logging.info('Context %10s is followed by %s %3d times',
-                        quote(context_i.representative)[::-1],
-                        base,
-                        context_counts[context_i.value.id,base.ordValue])
-
-            count_contexts(index, context_counts, copy(i))
-            if not i.goRight():
-                break
 
 
-def _make_prefix_index(seqs):
-    "Make an index out of the reverse of the sequences."
-    sequences = seqan.StringDnaSet()
-    logging.info('Building prefix index from:')
-    for seq in seqs:
-        logging.info('\t%s', seq)
-        sequences.appendValue(seqan.StringDna(seq[::-1]))
-    return seqan.IndexEsaDna(sequences)
-
-
-def init_context_counts(index):
-    """Initialise a matrix suitable to count contexts for the given index.
+def _test_count_contexts():
+    """Read the reversed sequences, split them into known sections and put them in a StringDNASet.
     """
-    from scipy.sparse import dok_matrix
-    from scipy import uint32
-    return dok_matrix((2 * len(index), 4), dtype=uint32)
-
-
-def test_count_contexts():
-    """Read the reversed sequences, split them into known sections and put them in a StringDnaSet.
-    """
-    logging.info(sys._getframe().f_code.co_name)
+    logger.info(sys._getframe().f_code.co_name)
 
     seqs = (
         'AACGGT',
         'AACGGA',
     )
-    index = _make_prefix_index(seqs)
-    i = index.TopDownIterator(index)
-    i.goDownStr(seqan.StringDna('A'))
-    assert 'A' == i.representative
+    index = cacto.make_prefix_index(seqs)
     context_counts = dict()
     count_contexts(index, context_counts, index.TopDownIterator(index))
     show_contexts(index, context_counts, index.TopDownIterator(index))
     1/0
 
+
+
+def build_desired_prefix_counts(seqs):
+    from collections import defaultdict
+    desired = defaultdict(int)
+    for seq in seqs:
+        print 'Seq:', seq
+        for i in xrange(1, len(seq)+1):
+            print 'Prefix:', seq[:i]
+            desired[seq[:i]] += 1
+    return desired
+
+
+def test_count_prefixes():
+    """Read the reversed sequences, split them into known sections
+    and put them in a StringDNASet.
+    """
+    logger.info(sys._getframe().f_code.co_name)
+
+    for seqs in (
+        (
+            'AAAA',
+            'TTAA',
+            'AAT',
+        ),
+        (
+            'TCCTAAT',
+            'GTTGCA',
+            'AT',
+        ),
+    ):
+        index = cacto.make_prefix_index(seqs)
+        prefix_counts = dict()
+        cacto.count_prefixes(index, prefix_counts, index.topdown())
+        desired_results = build_desired_prefix_counts(seqs)
+        print desired_results
+        for i, count in prefix_counts.iteritems():
+            prefix = str(i.representative)[::-1]
+            logger.info(
+                '%-10s is a prefix %2d times',
+                quote(prefix), count)
+            assert desired_results[prefix] == count
+            del desired_results[prefix]
+        assert not desired_results
+
+
+def _test_empty_model_predictions():
+    seqs = tuple('',)
+    model = cacto.CactoModel(seqs)
+    #
+    # No matter what the context we should see p = 1/4
+    #
+    for u in (
+        '',
+        'A',
+        'GC',
+    ):
+        x = seqan.DNA('A')
+        logger.info('p(%s|%s) = %.3e', x, u, model.predictive(x, u))
+        assert abs(.25 - model.p(x, u)) < 1e-15
+
+
+def test_simple_model_predictions():
+    seqs = (
+        'A',
+        'C',
+        'G',
+        'T',
+    )
+    model = cacto.CactoModel(seqs)
+    #
+    # No matter what the context we should see p = 1/4
+    #
+    for u in (
+        '',
+        'A',
+        'GC',
+    ):
+        x = seqan.DNA('A')
+        logger.info('p(%s|%s) = %.3e', x, u, model.predictive(x, u))
+        assert abs(.25 - model.predictive(x, u)) < 1e-15
+
+
+def test_model_predictions():
+    seqs = (
+        'ATATATATATAT',
+        'AA',
+        'AC',
+        'AG',
+        'AT',
+        'AA',
+        'AC',
+        'AG',
+        'AT',
+        'AA',
+        'AC',
+        'AG',
+        'AT',
+    )
+    model = cacto.CactoModel(seqs)
+    #
+    # No matter what the context we should see p = 1/4
+    #
+    for u in (
+        'ATATATATATA',
+        'A',
+        'GC',
+    ):
+        x = seqan.DNA('T')
+        model.predictive(x, u)
+        #assert abs(.25 - model.predictive(x, u)) < 1e-15
+    1/0
 
