@@ -1,0 +1,2 @@
+. $HOME/Dev/pyseqan/virtualenv/bin/activate
+PYTHONPATH=$HOME/Dev/cacto

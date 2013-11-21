@@ -140,7 +140,13 @@ class CactoModel(object):
             pG_x_given_u)
         # We should keep descending if we matched the whole of the
         # representative so far and there is more tree to descend
-        if i.representative == u[:i.repLength] and i.goDown():
+        from IPython.core.debugger import Tracer
+        #Tracer()()
+        if (
+            i.repLength < len(u) 
+            and i.representative == u[:i.repLength] 
+            and i.goDown(u[i.repLength:])
+        ):
             return self._p(i, x, u, pG_x_given_u)
         else:
             # can't go any further down this context
