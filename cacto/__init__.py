@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 import numpy
 import seqan
 from copy import copy
+from collections import defaultdict
 
 
 ALPHABET_LEN = 4
@@ -27,16 +28,20 @@ def make_prefix_index(seqs):
     return seqan.IndexStringDNASetESA(sequences)
 
 
-def count_prefixes(prefix_tree, prefix_counts, i):
+def count_prefixes(prefix_tree, prefix_counts=None, i=None):
     """Count how many times each prefix occurs in the prefix_tree.
     """
     from itertools import imap
+    if prefix_counts is None:
+        prefix_counts = dict()
+    if i is None:
+        i = prefix_tree.topdown()
     logger.debug('Counting prefixes for: "%s"', i.representative)
     for occ in i.occurrences:
         assert i.representative == \
             prefix_tree.text[occ.i1][occ.i2:occ.i2+i.repLength]
     prefix_count = sum(imap(
-        lambda occ: occ.i2 + i.repLength == len(prefix_tree.text[occ.i1]), 
+        lambda occ: occ.i2 + i.repLength == len(prefix_tree.text[occ.i1]),
         i.occurrences))
     occ = i.occurrences[0]
     if prefix_count:
@@ -48,22 +53,33 @@ def count_prefixes(prefix_tree, prefix_counts, i):
             if not i.goRight():
                 break
 
+    return prefix_counts
 
-def count_contexts(prefix_tree, prefixes, alphabet_len=ALPHABET_LEN):
-    """Create a dictionary mapping vertex identifiers to counts. Each set of
+
+def count_contexts(prefix_tree, prefix_counts, alphabet_len=ALPHABET_LEN):
+    """Create a dictionary mapping vertexes to counts. Each set of
     counts for a vertex reflects the number of times those bases follow
-    the context, that the vertex represents.
+    the context that the vertex represents.
     """
-    s = dict()
-    for prefix_i, count in prefixes.iteritems():
+    context_counts = defaultdict(lambda: numpy.zeros(alphabet_len))
+    for prefix_i, count in prefix_counts.iteritems():
         # context is all but last symbol, reversed
-        u = str(prefix_i.representative)[-2::-1]
-        x = prefix_i.representative[prefix_i.repLength-1]  # last symbol
+        prefix = str(prefix_i.representative)[::-1]
+        u = prefix[:-1]
+        #x = prefix_i.representative[prefix_i.repLength-1]
+        x = prefix_i.representative[0]
+        logger.debug('prefix = "%s"', prefix)
+        logger.debug('u      =  %s', u)
+        logger.debug('x      =  %s%s', ' ' * len(u), x)
+        assert prefix == u + str(x)
+        #logger.debug(u[::-1])
+        #logger.debug(str(prefix_i.representative)[1:])
+        assert u[::-1] == str(prefix_i.representative)[1:]
         u_i = prefix_tree.topdown()
-        u_i.goDown(u)
-        su = s.setdefault(u_i.value.id, numpy.zeros(alphabet_len))
-        su[x.ordValue] += count
-    return s
+        if not u_i.goDown(u[::-1]):
+            raise ValueError('Could not descend context')
+        context_counts[u_i.value][x.ordValue] += count
+    return context_counts
 
 
 class CactoModel(object):
@@ -134,17 +150,17 @@ class CactoModel(object):
             theta + sum(su) + tu_children.sum()
         )
         logger.info(
-            'p_G(%s|%s) = %.2e', 
-            i.representative.Value.fromOrdinal(x), 
-            str(i.representative)[::-1], 
+            'p_G(%s|%s) = %.2e',
+            i.representative.Value.fromOrdinal(x),
+            str(i.representative)[::-1],
             pG_x_given_u)
         # We should keep descending if we matched the whole of the
         # representative so far and there is more tree to descend
         from IPython.core.debugger import Tracer
         #Tracer()()
         if (
-            i.repLength < len(u) 
-            and i.representative == u[:i.repLength] 
+            i.repLength < len(u)
+            and i.representative == u[:i.repLength]
             and i.goDown(u[i.repLength:])
         ):
             return self._p(i, x, u, pG_x_given_u)
@@ -158,8 +174,8 @@ class CactoModel(object):
         logger.info('Evaluating: p_G(%s|%s)', x, u)
         p_x_given_u = self._p(
             self.prefix_tree.topdown(),
-            x.ordValue, 
-            u, 
+            x.ordValue,
+            u,
             1./ALPHABET_LEN)
         logger.info('p(%s|%s) = %.3e', x, u, p_x_given_u)
         return p_x_given_u
