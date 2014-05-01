@@ -36,14 +36,15 @@ def count_prefixes(prefix_tree, prefix_counts=None, i=None):
         prefix_counts = dict()
     if i is None:
         i = prefix_tree.topdown()
-    logger.debug('Counting prefixes for: "%s"', i.representative)
-    for occ in i.occurrences:
-        assert i.representative == \
-            prefix_tree.text[occ.i1][occ.i2:occ.i2+i.repLength]
+    # Check all occurrences match
+    assert [i.representative] * i.countOccurrences == \
+        [prefix_tree.text[occ.i1][occ.i2:occ.i2+i.repLength]
+            for occ in i.occurrences]
     prefix_count = sum(imap(
         lambda occ: occ.i2 + i.repLength == len(prefix_tree.text[occ.i1]),
         i.occurrences))
     occ = i.occurrences[0]
+    logger.debug('Have %3d prefixes for: "%s"', prefix_count, str(i.representative)[::-1])
     if prefix_count:
         prefix_counts[copy(i)] = prefix_count
 
@@ -61,16 +62,17 @@ def count_contexts(prefix_tree, prefix_counts, alphabet_len=ALPHABET_LEN):
     counts for a vertex reflects the number of times those bases follow
     the context that the vertex represents.
     """
-    context_counts = defaultdict(lambda: numpy.zeros(alphabet_len))
+    #context_counts = defaultdict(lambda: numpy.zeros(alphabet_len))
+    context_counts = numpy.zeros((2 * len(prefix_tree), alphabet_len))
     for prefix_i, count in prefix_counts.iteritems():
         # context is all but last symbol, reversed
         prefix = str(prefix_i.representative)[::-1]
         u = prefix[:-1]
         #x = prefix_i.representative[prefix_i.repLength-1]
         x = prefix_i.representative[0]
-        logger.debug('prefix = "%s"', prefix)
-        logger.debug('u      =  %s', u)
-        logger.debug('x      =  %s%s', ' ' * len(u), x)
+        #logger.debug('prefix = "%s"', prefix)
+        #logger.debug('u      =  %s', u)
+        #logger.debug('x      =  %s%s', ' ' * len(u), x)
         assert prefix == u + str(x)
         #logger.debug(u[::-1])
         #logger.debug(str(prefix_i.representative)[1:])
@@ -78,7 +80,7 @@ def count_contexts(prefix_tree, prefix_counts, alphabet_len=ALPHABET_LEN):
         u_i = prefix_tree.topdown()
         if not u_i.goDown(u[::-1]):
             raise ValueError('Could not descend context')
-        context_counts[u_i.value][x.ordValue] += count
+        context_counts[u_i.value.id][x.ordValue] += count
     return context_counts
 
 
@@ -109,7 +111,7 @@ class CactoModel(object):
 
     def _su(self, i):
         "The prefix counts for the given context."
-        return self.s.get(i.value.id, self._empty_counts)
+        return self.s[i.value.id]
 
 
     def theta(self, context_len):

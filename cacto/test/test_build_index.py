@@ -74,18 +74,24 @@ def quote(s):
     return '"%s"' % s
 
 
+def prefixfor(it):
+    return str(it.representative)[::-1]
+
+
 def build_desired_prefix_counts(seqs):
     from collections import defaultdict
-    desired = defaultdict(int)
+    desired = dict()
     for seq in seqs:
-        logger.info('Seq: %s', seq)
+        #logger.debug('Seq: %s', seq)
         for i in xrange(1, len(seq)+1):
-            logger.info('Prefix: %s', seq[:i])
-            desired[seq[:i]] += 1
+            prefix = seq[:i]
+            #logger.debug('Prefix: %s', prefix)
+            desired[prefix] = desired.get(prefix, 0) + 1
     return desired
 
 
 def build_desired_context_counts(seqs):
+    """Alternative algorithm to count symbols following each context."""
     desired_prefix_counts = build_desired_prefix_counts(seqs)
     countinit = lambda: numpy.zeros(4)
     desired = defaultdict(countinit)
@@ -147,7 +153,7 @@ def test_count_prefixes():
         for prefix, count in desired_results.iteritems():
             logger.info('Desired: %-10s is a prefix %2d times', prefix, count)
         for i, count in prefix_counts.iteritems():
-            prefix = str(i.representative)[::-1]
+            prefix = prefixfor(i)
             logger.info(
                 '%-10s is a prefix %2d times',
                 quote(prefix), count)
@@ -160,14 +166,14 @@ def test_count_prefixes():
 def remove_counts(it, context_counts, desired_counts):
     if it.goDown():
         while True:
-            context = str(it.representative)[::-1]
-            #if context not in desired_counts:
-                #raise ValueError('Context "{0}" not in desired counts'.format(str
-            desired_counts[context] -= context_counts[it.value]
-            remove_counts(copy(it), context_counts)
+            context = prefixfor(it)
+            logger.debug('Removing counts for %s', quote(context))
+            desired_counts[context] -= context_counts[it.value.id]
+            if 0 == desired_counts[context].sum():
+                del desired_counts[context]
+            remove_counts(copy(it), context_counts, desired_counts)
             if not it.goRight():
                 break
-
 
 def test_count_contexts():
     """Count how many of each symbol follow each context."""
@@ -175,15 +181,17 @@ def test_count_contexts():
     for seqs in prefix_seq_sets:
         prefix_tree = cacto.make_prefix_index(seqs)
         prefix_counts = cacto.count_prefixes(prefix_tree)
-        for i, count in prefix_counts.iteritems():
-            prefix = str(i.representative)[::-1]
-            logger.debug('Prefix count: "{0}": {1}'.format(prefix, count))
         context_counts = cacto.count_contexts(prefix_tree, prefix_counts)
-        for vertex, counts in context_counts.iteritems():
-            it = prefix_tree.TopDownIterator(prefix_tree, vertex)
-            logger.debug('Context counts: "{0}": {1}'.format(str(it.representative)[::-1], counts))
+        def logcontextcounts(parent, it):
+            logger.debug('Context counts: %-10s: %s',
+                quote(prefixfor(it)), context_counts[it.value.id])
+        seqan.CallbackDescender(logcontextcounts)._descend(prefix_tree.topdown())
         desired_counts = build_desired_context_counts(seqs)
-        #remove_counts(prefix_tree.topdown(), prefix_counts, desired_counts)
+        for context, counts in desired_counts.iteritems():
+            logger.debug('Desired counts: %-10s: %s', quote(context), counts)
+        remove_counts(prefix_tree.topdown(), context_counts, desired_counts)
+        if desired_counts:
+            raise ValueError('Desired counts did not match calculated counts')
 
 
 def _test_empty_model_predictions():
