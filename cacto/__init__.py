@@ -1,5 +1,5 @@
 #
-# Copyright John Reid 2013
+# Copyright John Reid 2013, 2014
 #
 
 """
@@ -8,7 +8,7 @@ A python package for non-parametric sequence models.
 
 
 import logging
-logger = logging.getLogger(__name__)
+_logger = logging.getLogger(__name__)
 
 import numpy
 import seqan
@@ -23,7 +23,7 @@ def make_prefix_index(seqs):
     "Make an index out of the reverse of the sequences."
     sequences = seqan.StringDNASet()
     for seq in seqs:
-        logger.info('Building prefix index from: %s', seq)
+        _logger.info('Building prefix index from: %s', seq)
         sequences.appendValue(seqan.StringDNA(seq[::-1]))
     return seqan.IndexStringDNASetESA(sequences)
 
@@ -40,13 +40,14 @@ def count_prefixes(prefix_tree, prefix_counts=None, i=None):
     assert [i.representative] * i.countOccurrences == \
         [prefix_tree.text[occ.i1][occ.i2:occ.i2+i.repLength]
             for occ in i.occurrences]
+    # Count how many occurrences match the whole string
     prefix_count = sum(imap(
         lambda occ: occ.i2 + i.repLength == len(prefix_tree.text[occ.i1]),
         i.occurrences))
-    occ = i.occurrences[0]
-    logger.debug('Have %3d prefixes for: "%s"', prefix_count, str(i.representative)[::-1])
     if prefix_count:
         prefix_counts[copy(i)] = prefix_count
+        _logger.debug('Have %3d prefixes of: "%s"',
+                      prefix_count, str(i.representative)[::-1])
 
     if i.goDown():
         while True:
@@ -70,17 +71,19 @@ def count_contexts(prefix_tree, prefix_counts, alphabet_len=ALPHABET_LEN):
         u = prefix[:-1]
         #x = prefix_i.representative[prefix_i.repLength-1]
         x = prefix_i.representative[0]
-        #logger.debug('prefix = "%s"', prefix)
-        #logger.debug('u      =  %s', u)
-        #logger.debug('x      =  %s%s', ' ' * len(u), x)
+        _logger.debug('prefix = "%s"', prefix)
+        _logger.debug('u      =  %s', u)
+        _logger.debug('x      =  %s%s', ' ' * len(u), x)
         assert prefix == u + str(x)
-        #logger.debug(u[::-1])
-        #logger.debug(str(prefix_i.representative)[1:])
+        #_logger.debug(u[::-1])
+        #_logger.debug(str(prefix_i.representative)[1:])
         assert u[::-1] == str(prefix_i.representative)[1:]
         u_i = prefix_tree.topdown()
+        # Check that we can descend the prefix tree to the correct context
         if not u_i.goDown(u[::-1]):
             raise ValueError('Could not descend context')
-        context_counts[u_i.value.id][x.ordValue] += count
+        if count:
+            context_counts[u_i.value.id][x.ordValue] += count
     return context_counts
 
 
@@ -151,7 +154,7 @@ class CactoModel(object):
         ) / (
             theta + sum(su) + tu_children.sum()
         )
-        logger.info(
+        _logger.info(
             'p_G(%s|%s) = %.2e',
             i.representative.Value.fromOrdinal(x),
             str(i.representative)[::-1],
@@ -173,11 +176,11 @@ class CactoModel(object):
 
     def predictive(self, x, u):
         "p(x|u) where u is the context and x is the next symbol"
-        logger.info('Evaluating: p_G(%s|%s)', x, u)
+        _logger.info('Evaluating: p_G(%s|%s)', x, u)
         p_x_given_u = self._p(
             self.prefix_tree.topdown(),
             x.ordValue,
             u,
             1./ALPHABET_LEN)
-        logger.info('p(%s|%s) = %.3e', x, u, p_x_given_u)
+        _logger.info('p(%s|%s) = %.3e', x, u, p_x_given_u)
         return p_x_given_u

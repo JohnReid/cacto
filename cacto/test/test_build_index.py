@@ -75,6 +75,7 @@ def quote(s):
 
 
 def prefixfor(it):
+    """The prefix for an iterator is the reverse of its representative."""
     return str(it.representative)[::-1]
 
 
@@ -104,6 +105,14 @@ prefix_seq_sets = (
     (
         'AACGGT',
         'AACGGA',
+    ),
+    (
+        'GAACGGT',
+        'CAACGGA',
+    ),
+    (
+        'TAACGG',
+        'AAACGG',
     ),
     (
         'TAACGG',
@@ -164,33 +173,44 @@ def test_count_prefixes():
 
 
 def remove_counts(it, context_counts, desired_counts):
+    """Remove the counts in context_counts from desired_counts.
+    We expect both to agree and there will be no counts left
+    in desired_counts."""
+    context = prefixfor(it)
+    logger.debug('Removing counts for %s', quote(context))
+    desired_counts[context] -= context_counts[it.value.id]
+    if 0 == desired_counts[context].sum():
+        del desired_counts[context]
     if it.goDown():
         while True:
-            context = prefixfor(it)
-            logger.debug('Removing counts for %s', quote(context))
-            desired_counts[context] -= context_counts[it.value.id]
-            if 0 == desired_counts[context].sum():
-                del desired_counts[context]
             remove_counts(copy(it), context_counts, desired_counts)
             if not it.goRight():
                 break
+
 
 def test_count_contexts():
     """Count how many of each symbol follow each context."""
     logger.info(sys._getframe().f_code.co_name)
     for seqs in prefix_seq_sets:
         prefix_tree = cacto.make_prefix_index(seqs)
+        #cacto.log_prefix_tree(prefix_tree.topdown())
+        def logprefixcounts(parent, it):
+            logger.debug('Prefix tree: "%s"', str(it.representative)[::-1])
+        #seqan.CallbackDescender(logprefixcounts)(prefix_tree)
         prefix_counts = cacto.count_prefixes(prefix_tree)
         context_counts = cacto.count_contexts(prefix_tree, prefix_counts)
         def logcontextcounts(parent, it):
             logger.debug('Context counts: %-10s: %s',
                 quote(prefixfor(it)), context_counts[it.value.id])
-        seqan.CallbackDescender(logcontextcounts)._descend(prefix_tree.topdown())
+        seqan.CallbackDescender(logcontextcounts)(prefix_tree)
         desired_counts = build_desired_context_counts(seqs)
         for context, counts in desired_counts.iteritems():
             logger.debug('Desired counts: %-10s: %s', quote(context), counts)
         remove_counts(prefix_tree.topdown(), context_counts, desired_counts)
         if desired_counts:
+            for context, counts in desired_counts.iteritems():
+                logger.error('Desired counts remaining: %-10s: %s',
+                             quote(context), counts)
             raise ValueError('Desired counts did not match calculated counts')
 
 
