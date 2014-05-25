@@ -87,7 +87,7 @@ def build_desired_context_counts(seqs):
     countinit = lambda: numpy.zeros(4)
     desired = defaultdict(countinit)
     for prefix, count in desired_prefix_counts.iteritems():
-        desired[prefix[:-1]][seqan.DNA(prefix[-1]).ordValue] += count
+        desired[prefix[:-1]][cacto.Value(prefix[-1]).ordValue] += count
     return desired
 
 
@@ -248,7 +248,7 @@ def _test_empty_model_predictions():
         'A',
         'GC',
     ):
-        x = seqan.DNA('A')
+        x = cacto.Value('A')
         logger.info('p(%s|%s) = %.3e', x, u, model.predictive(x, u))
         assert abs(.25 - model.p(x, u)) < 1e-15
 
@@ -269,7 +269,7 @@ def test_simple_model_predictions():
         'A',
         'GC',
     ):
-        x = seqan.DNA('A')
+        x = cacto.Value('A')
         logger.info('p(%s|%s) = %.3e', x, u, model.predictive(x, u))
         p = model.predictive(x, u)
         if abs(.25 - model.predictive(x, u)) >= 1e-15:
@@ -358,14 +358,14 @@ prediction_sets = (
 )
 
 
-def _test_model_predictions():
+def test_model_predictions():
     import seqan
     for seqs, test_xs_us in prediction_sets:
         model = cacto.CactoModel(seqs)
         for x, u in test_xs_us:
-            p = model.predictive(seqan.DNA(x), u)
+            p = model.predictive(cacto.Value(x), u)
             i = model._locate_context(u, topdownhistory=True)
-            p2 = model._p2(cacto.Value(x).ordValue, i)
+            p2 = model.predictive2(cacto.Value(x).ordValue, i)
             assert (p - p2) / (p + p2) * 2 < 1e-10, '{0} and {1} are not close'.format(p, p2)
             #assert abs(.25 - model.predictive(x, u)) < 1e-15
         if False:  # Choose whether to build graph or not

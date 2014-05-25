@@ -39,7 +39,7 @@ def make_prefix_index(seqs):
     "Make an index out of the reverse of the sequences."
     sequences = StringSet()
     for seq in seqs:
-        _logger.info('Building prefix index from: %s', seq)
+        _logger.debug('Building prefix index from: %s', seq)
         sequences.appendValue(String(seq[::-1]))
     return ESA(sequences)
 
@@ -163,7 +163,7 @@ class CactoModel(object):
         du = self.d(ulen)
         tu = self._tu(i)
         oddsoldtable = (self.s[i.value.id,xord] + du * tu[xord]) / (
-            self._p2(xord, i) * (self.theta(ulen) + du * tu.sum())
+            self.predictive2(xord, i) * (self.theta(ulen) + du * tu.sum())
         )
         poldtable = oddsoldtable / (1 + oddsoldtable)
         if numpy.random.uniform() >= poldtable:
@@ -207,7 +207,7 @@ class CactoModel(object):
         return result
 
 
-    def _p2(self, xord, i):
+    def predictive2(self, xord, i):
         """Recursive function to determine likelihoods.
 
         - xord: The ordinal value of the draw.
@@ -222,7 +222,7 @@ class CactoModel(object):
         thetau = self.theta(ulen)
         # p(x|sigma(u))
         if i.goUp():
-            p_x_sigmau = self._p2(xord, i)
+            p_x_sigmau = self.predictive2(xord, i)
         else:
             p_x_sigmau = uniformovervalues
         # Contribution from this node
@@ -250,7 +250,7 @@ class CactoModel(object):
         ) / (
             theta + sum(su) + tu_children.sum()
         )
-        _logger.info(
+        _logger.debug(
             '          : p_G(x=%s|u=%-15s) = %.3e',
             Value.fromOrdinal(x),
             quote(str(i.representative)[::-1]),
@@ -282,6 +282,6 @@ class CactoModel(object):
 
     def predictive(self, x, u):
         "p(x|u) where u is the context and x is the next symbol"
-        _logger.info('Evaluating: p_G(x=%s|u=%-15s)', x, quote(u))
+        _logger.debug('Evaluating: p_G(x=%s|u=%-15s)', x, quote(u))
         return self._predictive(x.ordValue, u)
-        #_logger.info('          : p_G(x=%s|u=%-15s) = %.3e', x, quote(u), p_x_given_u)
+        #_logger.debug('          : p_G(x=%s|u=%-15s) = %.3e', x, quote(u), p_x_given_u)
