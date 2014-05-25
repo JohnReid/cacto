@@ -69,16 +69,6 @@ def test_read_sequences():
     read_sequences(fasta_file('dm01r.fasta'))
 
 
-def quote(s):
-    """Wrap the string in quotes."""
-    return '"%s"' % s
-
-
-def prefixfor(it):
-    """The prefix for an iterator is the reverse of its representative."""
-    return str(it.representative)[::-1]
-
-
 def build_desired_prefix_counts(seqs):
     from collections import defaultdict
     desired = dict()
@@ -162,10 +152,10 @@ def test_count_prefixes():
         for prefix, count in desired_results.iteritems():
             logger.info('Desired: %-10s is a prefix %2d times', prefix, count)
         for i, count in prefix_counts.iteritems():
-            prefix = prefixfor(i)
+            prefix = cacto.prefixfor(i)
             logger.info(
                 '%-10s is a prefix %2d times',
-                quote(prefix), count)
+                cacto.quote(prefix), count)
             assert desired_results[prefix] == count
             del desired_results[prefix]
         # check is empty to show we found all the prefixes
@@ -176,8 +166,8 @@ def remove_counts(it, context_counts, desired_counts):
     """Remove the counts in context_counts from desired_counts.
     We expect both to agree and there will be no counts left
     in desired_counts."""
-    context = prefixfor(it)
-    logger.debug('Removing counts for %s', quote(context))
+    context = cacto.prefixfor(it)
+    logger.debug('Removing counts for %s', cacto.quote(context))
     desired_counts[context] -= context_counts[it.value.id]
     if 0 == desired_counts[context].sum():
         del desired_counts[context]
@@ -201,17 +191,49 @@ def test_count_contexts():
         context_counts = cacto.count_contexts(prefix_tree, prefix_counts)
         def logcontextcounts(parent, it):
             logger.debug('Context counts: %-10s: %s',
-                quote(prefixfor(it)), context_counts[it.value.id])
+                cacto.quote(cacto.prefixfor(it)), context_counts[it.value.id])
         seqan.CallbackDescender(logcontextcounts)(prefix_tree)
         desired_counts = build_desired_context_counts(seqs)
         for context, counts in desired_counts.iteritems():
-            logger.debug('Desired counts: %-10s: %s', quote(context), counts)
+            logger.debug('Desired counts: %-10s: %s', cacto.quote(context), counts)
         remove_counts(prefix_tree.topdown(), context_counts, desired_counts)
         if desired_counts:
             for context, counts in desired_counts.iteritems():
                 logger.error('Desired counts remaining: %-10s: %s',
-                             quote(context), counts)
+                             cacto.quote(context), counts)
             raise ValueError('Desired counts did not match calculated counts')
+
+
+def test_simple_model_initialisation_1():
+    """Test how the table counts are initialised in a simple model.
+    A simple model that has emitted one of each base from the empty context
+    must have one table for each base in the root context and no other tables."""
+    model = cacto.CactoModel(('A', 'C', 'G', 'T'))
+    t = model.t.copy()
+    t[model.prefix_tree.topdown().value.id] -= 1
+    assert (0 == t).all()
+
+
+def test_simple_model_initialisation_2():
+    """Test how the table counts are initialised in a simple model.
+    A simple model that has emitted 'G' and 'T' from the empty context
+    must have one table for those bases in the root context and no other tables."""
+    model = cacto.CactoModel(('G','T'))
+    t = model.t.copy()
+    t[model.prefix_tree.topdown().value.id,2] -= 1
+    t[model.prefix_tree.topdown().value.id,3] -= 1
+    assert (0 == t).all()
+
+
+def test_model_initialisation_1():
+    """Test how the table counts are initialised."""
+    model = cacto.CactoModel(('CGAT',))
+    seqan.CallbackDescender(model.log_table_counts)(model.prefix_tree)
+    t = model.t.copy()
+    i_cga = model.prefix_tree.topdown()
+    if not i_cga.goDown('CGA'[::-1]):
+        raise ValueError('Should have been able to find prefix "CGA"')
+    assert ([0,0,0,1] == t[i_cga.value.id]).all()
 
 
 def _test_empty_model_predictions():
@@ -249,57 +271,123 @@ def test_simple_model_predictions():
     ):
         x = seqan.DNA('A')
         logger.info('p(%s|%s) = %.3e', x, u, model.predictive(x, u))
-        assert abs(.25 - model.predictive(x, u)) < 1e-15
+        p = model.predictive(x, u)
+        if abs(.25 - model.predictive(x, u)) >= 1e-15:
+            raise ValueError('p not close to 1/4')
+
+
+prediction_sets = (
+
+    (
+        ( # Sequences
+            'A',
+            'C',
+            'G',
+            'T',
+        ),
+        ( # test xs and us
+            ('A', ''),
+            ('A', 'ACGT'),
+            ('C', ''),
+        ),
+    ),
+
+    (
+        ( # Sequences
+            'GCAT',
+            'GCAT',
+        ),
+        ( # test xs and us
+            ('T', 'CAA'),
+            ('T', 'G'),
+            ('G', ''),
+            ('C', ''),
+        ),
+    ),
+
+    (
+        ( # Sequences
+            'ATATATATATAT',
+            'ATATATATATAT',
+            'ATATATATATAT',
+            'ATATATATATAT',
+            'ATATATATATAT',
+            'ATATATATATAT',
+            'AA',
+            'AC',
+            'AG',
+            'AT',
+            'AA',
+            'AC',
+            'AG',
+            'AT',
+            'AA',
+            'AC',
+            'AG',
+            'AT',
+        ),
+        ( # test xs and us
+            ('T', 'CAA'),
+            ('T', 'A'),
+            ('T', 'ATATATATATATA'),
+            ('T', 'ATATATATATA'),
+            ('T', 'ATATATA'),
+        ),
+    ),
+
+    (
+        ( # Sequences
+            'AA',
+            'AC',
+            'AG',
+            'AT',
+        ),
+        ( # test xs and us
+            ('A', 'A'),
+            ('T', 'A'),
+            ('G', 'A'),
+            ('A', 'G'),
+            ('T', 'G'),
+            ('G', 'G'),
+            ('A', ''),
+            ('T', ''),
+            ('G', ''),
+        ),
+    ),
+
+)
 
 
 def _test_model_predictions():
-    import seqan.io.graphtool
-    seqs = (
-        'ATATATATATAT',
-        'ATATATATATAT',
-        'ATATATATATAT',
-        'ATATATATATAT',
-        'ATATATATATAT',
-        'ATATATATATAT',
-        'AA',
-        'AC',
-        'AG',
-        'AT',
-        'AA',
-        'AC',
-        'AG',
-        'AT',
-        'AA',
-        'AC',
-        'AG',
-        'AT',
-    )
-    model = cacto.CactoModel(seqs)
-    for u in (
-        'ATATATATATA',
-        'A',
-        'GC',
-    ):
-        x = seqan.DNA('T')
-        model.predictive(x, u)
-        #assert abs(.25 - model.predictive(x, u)) < 1e-15
-    builder = seqan.io.graphtool.Builder(model.prefix_tree)
-    seqan.io.graphtool.GT.graph_draw(
-        builder.graph,
-        pos=seqan.io.graphtool.GT.sfdp_layout(builder.graph),
-        vertex_size=2,
-        vertex_fill_color="lightgrey",
-        vertex_font_size=8,
-        vertex_text=builder.map_vertices(lambda it: '{0} {1} {2} {3}'.format(*map(int, model._su(it)))),
-        vertex_pen_width=seqan.io.graphtool.root_vertex_property(builder),
-        edge_text=seqan.io.graphtool.edge_labels_for_output(builder),
-        edge_color=seqan.io.graphtool.color_edges_by_first_symbol(builder),
-        edge_end_marker="none",
-        edge_pen_width=2,
-        #edge_dash_style=seqan.io.graphtool.dash_non_suffix_edges(builder, suffix),
-        #edge_pen_width=builder.edge_lengths,
-        #output="graphtool.png"
-    )
+    import seqan
+    for seqs, test_xs_us in prediction_sets:
+        model = cacto.CactoModel(seqs)
+        for x, u in test_xs_us:
+            p = model.predictive(seqan.DNA(x), u)
+            i = model._locate_context(u, topdownhistory=True)
+            p2 = model._p2(cacto.Value(x).ordValue, i)
+            assert (p - p2) / (p + p2) * 2 < 1e-10, '{0} and {1} are not close'.format(p, p2)
+            #assert abs(.25 - model.predictive(x, u)) < 1e-15
+        if False:  # Choose whether to build graph or not
+            import seqan.io.graphtool
+            builder = seqan.io.graphtool.Builder(model.prefix_tree)
+            seqan.io.graphtool.GT.graph_draw(
+                builder.graph,
+                pos=seqan.io.graphtool.GT.sfdp_layout(builder.graph),
+                vertex_size=2,
+                vertex_fill_color="lightgrey",
+                vertex_font_size=8,
+                vertex_text=builder.map_vertices(
+                    lambda it: '{0} {1} {2} {3}'.format(*map(int, model._su(it)))),
+                vertex_pen_width=seqan.io.graphtool.root_vertex_property(builder),
+                edge_text=seqan.io.graphtool.edge_labels_for_output(builder),
+                edge_color=seqan.io.graphtool.color_edges_by_first_symbol(builder),
+                edge_end_marker="none",
+                edge_pen_width=2,
+                #edge_dash_style=seqan.io.graphtool.dash_non_suffix_edges(builder, suffix),
+                #edge_pen_width=builder.edge_lengths,
+                #output="graphtool.png"
+            )
 
 
 if '__main__' == __name__:
