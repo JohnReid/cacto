@@ -11,6 +11,7 @@ import logging
 _logger = logging.getLogger(__name__)
 
 import numpy.random
+import math
 import seqan
 from copy import copy
 from collections import defaultdict
@@ -45,43 +46,56 @@ def make_prefix_index(seqs):
 
 
 def count_prefixes(prefix_tree, prefix_counts=None, i=None):
-    """Count how many times each prefix occurs in the prefix_tree.
+    """Recursive function that counts how many times each
+    prefix occurs in the prefix_tree.
+
+    Complexity: O(n log(n)) where n is the length of the text
     """
     from itertools import imap
+    # Use a dictionary if no counts object provided
     if prefix_counts is None:
         prefix_counts = dict()
+    # Use a root topdown iterator if none provided
     if i is None:
         i = prefix_tree.topdown()
-    # Check all occurrences match
+    # Double-check all occurrences match
     assert [i.representative] * i.numOccurrences == \
         [prefix_tree.text[occ.i1][occ.i2:occ.i2+i.repLength]
             for occ in i.occurrences]
     # Count how many occurrences match the whole string
-    prefix_count = sum(imap(
-        lambda occ: occ.i2 + i.repLength == len(prefix_tree.text[occ.i1]),
-        i.occurrences))
-    if prefix_count:
-        prefix_counts[copy(i)] = prefix_count
-        _logger.debug('Have %3d prefixes of: "%s"',
-                      prefix_count, str(i.representative)[::-1])
-
+    prefix_count = i.numOccurrences
+    copyi = copy(i)
+    # Alternative calculation for prefix counts
+    # alt_calculation = sum(imap(
+        # lambda occ: occ.i2 + i.repLength == len(prefix_tree.text[occ.i1]),
+        # i.occurrences))
+    # Recurse
     if i.goDown():
         while True:
+            # Any occurrences in children do not match the whole string
+            prefix_count -= i.numOccurrences
+            # Recurse
             count_prefixes(prefix_tree, prefix_counts, copy(i))
             if not i.goRight():
                 break
-
+    # Update counts if any occurrences matched the whole string
+    if prefix_count:
+        prefix_counts[copyi] = prefix_count
+        _logger.debug('Have %3d prefixes of: "%s"',
+                      prefix_count, str(i.representative)[::-1])
+    # Check our prefix count against alternative calculation
+    # assert prefix_count == alt_calculation
+    # Return counts
     return prefix_counts
 
 
-def count_contexts(prefix_tree, prefix_counts):
-    """Create a dictionary mapping vertexes to counts. Each set of
-    counts for a vertex reflects the number of times those bases follow
-    the context that the vertex represents.
+def count_contexts(prefix_tree):
+    """Count all the number of times each base is emitted in each context.
+
+    Complexity: O(n log(n)) (I think)
     """
-    #context_counts = defaultdict(lambda: numpy.zeros(Value.valueSize, dtype=int))
     context_counts = numpy.zeros((2 * len(prefix_tree), Value.valueSize), dtype=int)
-    for prefix_i, count in prefix_counts.iteritems():
+    def countcontextsforprefix(prefix_i, count):
         # context is all but last symbol, reversed
         prefix = str(prefix_i.representative)[::-1]
         u = prefix[:-1]
@@ -100,18 +114,57 @@ def count_contexts(prefix_tree, prefix_counts):
             raise ValueError('Could not descend context')
         if count:
             context_counts[u_i.value.id][x.ordValue] += count
+    seqan.findsuffixes(prefix_tree.topdown(), countcontextsforprefix)
     return context_counts
+
+
+def cactomodelfromseqs(seqs):
+    """Build a Cacto model from a given set of sequences."""
+    return CactoModel(make_prefix_index(seqs))
 
 
 class CactoModel(object):
     """A non-parametric sequence model.
     """
 
-    def __init__(self, seqs):
-        self.prefix_tree = make_prefix_index(seqs)
+    def __init__(self, prefixtree):
+        self.prefix_tree = prefixtree
         self.t = numpy.zeros((2 * len(self.prefix_tree), Value.valueSize), dtype=int)
         self.s = numpy.zeros((2 * len(self.prefix_tree), Value.valueSize), dtype=int)
         self._initialise()
+
+
+    def _initialise(self):
+        """Initialise the table counts."""
+        s = count_contexts(self.prefix_tree)
+        def initialise_vertex(parent, it):
+            "Initialise the vertex the iterator points to."
+            id_ = it.value.id
+            for xord, count in enumerate(s[id_]):
+                for _ in xrange(count):
+                    self._initialise_with(xord, copy(it))
+                    self.s[id_,xord] += 1
+        seqan.CallbackDescender(initialise_vertex)(self.prefix_tree, history=True)
+        assert (self.s == s).all()
+
+
+    def _initialise_with(self, xord, i):
+        """Take account of drawing x from the context at i in the prefix tree during
+        model initialisation.
+        """
+        ulen = i.repLength
+        du = self.d(ulen)
+        tu = self._tu(i)
+        oddsoldtable = (self.s[i.value.id,xord] + du * tu[xord]) / (
+            self.p_xord_given_ui(xord, i) * (self.theta(ulen) + du * tu.sum())
+        )
+        poldtable = oddsoldtable / (1 + oddsoldtable)
+        if numpy.random.uniform() >= poldtable:
+            # new table
+            tu[xord] += 1
+            # go up to the parent context if there is one
+            if i.goUp():
+                self._initialise_with(xord, i, s)
 
 
     def _locate_context(self, u, topdownhistory=False):
@@ -138,46 +191,21 @@ class CactoModel(object):
                       quote(prefixfor(it)), self.t[it.value.id])
 
 
-    def _initialise(self):
-        """Initialise the table counts."""
-        prefixes = dict()
-        count_prefixes(self.prefix_tree, prefixes, self.prefix_tree.topdown())
-        s = count_contexts(self.prefix_tree, prefixes)
-        def initialise_vertex(parent, it):
-            "Initialise the vertex the iterator points to."
-            id_ = it.value.id
-            for xord, count in enumerate(s[id_]):
-                for _ in xrange(count):
-                    self._initialise_with(xord, copy(it))
-                    self.s[id_,xord] += 1
-        seqan.CallbackDescender(initialise_vertex)(self.prefix_tree, history=True)
-        #seqan.CallbackDescender(self.log_context_counts)(self.prefix_tree)
-        assert (self.s == s).all()
-
-
-    def _initialise_with(self, xord, i):
-        """Take account of drawing x from the context at i in the prefix tree during
-        model initialisation.
-        """
-        ulen = i.repLength
-        du = self.d(ulen)
-        tu = self._tu(i)
-        oddsoldtable = (self.s[i.value.id,xord] + du * tu[xord]) / (
-            self.predictive2(xord, i) * (self.theta(ulen) + du * tu.sum())
-        )
-        poldtable = oddsoldtable / (1 + oddsoldtable)
-        if numpy.random.uniform() >= poldtable:
-            # new table
-            tu[xord] += 1
-            # go up to the parent context if there is one
-            sigmai = copy(i)
-            if sigmai.goUp():
-                self._initialise_with(xord, sigmai, s)
-
-
     def _tu(self, i):
         "The table counts for the given context."
         return self.t[i.value.id]
+
+
+    def _tu_children(self, i):
+        "Get the counts of tables in the children."
+        result = numpy.zeros(Value.valueSize, dtype=int)
+        child = copy(i)
+        if child.goDown():
+            while True:
+                result += self._tu(child)
+                if not child.goRight():
+                    break
+        return result
 
 
     def _su(self, i):
@@ -195,22 +223,10 @@ class CactoModel(object):
         return 0.
 
 
-    def _tu_children(self, i):
-        "Get the counts of tables in the children."
-        result = numpy.zeros(Value.valueSize, dtype=int)
-        child = copy(i)
-        if child.goDown():
-            while True:
-                result += self._tu(child)
-                if not child.goRight():
-                    break
-        return result
+    def p_xord_given_ui(self, xord, i):
+        """Recursive function to determine likelihood, p(x|u).
 
-
-    def predictive2(self, xord, i):
-        """Recursive function to determine likelihoods.
-
-        - xord: The ordinal value of the draw.
+        - xord: The ordinal value of x.
         - i: A top down history iterator for the node in the
           prefix tree that represents u
         """
@@ -222,7 +238,7 @@ class CactoModel(object):
         thetau = self.theta(ulen)
         # p(x|sigma(u))
         if i.goUp():
-            p_x_sigmau = self.predictive2(xord, i)
+            p_x_sigmau = self.p_xord_given_ui(xord, i)
         else:
             p_x_sigmau = uniformovervalues
         # Contribution from this node
@@ -234,7 +250,7 @@ class CactoModel(object):
         )
 
 
-    def _p(self, i, x, u, p_parent):
+    def _p_xord_given_u(self, i, x, u, p_parent):
         """Recursive function used to determine likelihoods"""
         context_len = len(u)
         su = self._su(i)
@@ -265,23 +281,43 @@ class CactoModel(object):
             and i.representative == u[:i.repLength]
             and i.goDown(u[-1-i.repLength])
         ):
-            return self._p(i, x, u, pG_x_given_u)
+            return self._p_xord_given_u(i, x, u, pG_x_given_u)
         else:
             # can't go any further down this context
             return pG_x_given_u
 
 
-    def _predictive(self, xord, u):
-        "p(x|u) where u is the context and x is the next symbol"
-        return self._p(
+    def p_xord_given_u(self, xord, u):
+        "p(x|u) where u is the context and xord is the ordinal value of the next symbol"
+        return self._p_xord_given_u(
             self.prefix_tree.topdown(),
             xord,
             u,
             uniformovervalues)
 
 
-    def predictive(self, x, u):
-        "p(x|u) where u is the context and x is the next symbol"
+    def p_x_given_u(self, x, u):
+        """p(x|u) where u is the context and x is the next symbol. This is less efficient
+        than"""
         _logger.debug('Evaluating: p_G(x=%s|u=%-15s)', x, quote(u))
-        return self._predictive(x.ordValue, u)
+        return self.p_xord_given_u(x.ordValue, u)
         #_logger.debug('          : p_G(x=%s|u=%-15s) = %.3e', x, quote(u), p_x_given_u)
+
+
+    def seqsloglikelihood(self, seqs):
+        """The log likelihood of the sequences.
+
+        The function builds a prefix tree of the sequences and counts how
+        many emissions have been made for each context. Then the prefix
+        tree is descended concurrently to the """
+        seqsprefixtree = make_prefix_index(seqs)
+        s = count_contexts(seqsprefixtree)
+        class LLDescender(seqan.ParallelDescender):
+            def __init__(self_):
+                self_.ll = 0.
+            def _visit_node(self_, modelit, seqsit, stillsynced):
+                for xord, count in enumerate(s[seqsit.value.id]):
+                    self_.ll += count * math.log(self.p_xord_given_ui(xord, copy(modelit)))
+        descender = LLDescender()
+        descender.descend(self.prefix_tree.topdownhistory(), seqsprefixtree.topdownhistory())
+        return descender.ll
