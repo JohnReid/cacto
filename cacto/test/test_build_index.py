@@ -183,20 +183,20 @@ def test_count_contexts():
     """Count how many of each symbol follow each context."""
     logger.info(sys._getframe().f_code.co_name)
     for seqs in prefix_seq_sets:
-        prefix_tree = cacto.make_prefix_index(seqs)
-        #cacto.log_prefix_tree(prefix_tree.topdown())
+        prefixindex = cacto.make_prefix_index(seqs)
+        #cacto.log_prefixindex(prefixindex.topdown())
         def logprefixcounts(parent, it):
             logger.debug('Prefix tree: "%s"', str(it.representative)[::-1])
-        #seqan.CallbackDescender(logprefixcounts)(prefix_tree)
-        context_counts = cacto.count_contexts(prefix_tree)
+        #seqan.CallbackDescender(logprefixcounts)(prefixindex)
+        context_counts = cacto.count_contexts(prefixindex)
         def logcontextcounts(parent, it):
             logger.debug('Context counts: %-10s: %s',
                 cacto.quote(cacto.prefixfor(it)), context_counts[it.value.id])
-        seqan.CallbackDescender(logcontextcounts)(prefix_tree)
+        seqan.CallbackDescender(logcontextcounts)(prefixindex)
         desired_counts = build_desired_context_counts(seqs)
         for context, counts in desired_counts.iteritems():
             logger.debug('Desired counts: %-10s: %s', cacto.quote(context), counts)
-        remove_counts(prefix_tree.topdown(), context_counts, desired_counts)
+        remove_counts(prefixindex.topdown(), context_counts, desired_counts)
         if desired_counts:
             for context, counts in desired_counts.iteritems():
                 logger.error('Desired counts remaining: %-10s: %s',
@@ -210,7 +210,7 @@ def test_simple_model_initialisation_1():
     must have one table for each base in the root context and no other tables."""
     model = cacto.cactomodelfromseqs(('A', 'C', 'G', 'T'))
     t = model.t.copy()
-    t[model.prefix_tree.topdown().value.id] -= 1
+    t[model.prefixindex.topdown().value.id] -= 1
     assert (0 == t).all()
 
 
@@ -220,17 +220,17 @@ def test_simple_model_initialisation_2():
     must have one table for those bases in the root context and no other tables."""
     model = cacto.cactomodelfromseqs(('G','T'))
     t = model.t.copy()
-    t[model.prefix_tree.topdown().value.id,2] -= 1
-    t[model.prefix_tree.topdown().value.id,3] -= 1
+    t[model.prefixindex.topdown().value.id,2] -= 1
+    t[model.prefixindex.topdown().value.id,3] -= 1
     assert (0 == t).all()
 
 
 def test_model_initialisation_1():
     """Test how the table counts are initialised."""
     model = cacto.cactomodelfromseqs(('CGAT',))
-    seqan.CallbackDescender(model.log_table_counts)(model.prefix_tree)
+    seqan.CallbackDescender(model.log_table_counts)(model.prefixindex)
     t = model.t.copy()
-    i_cga = model.prefix_tree.topdown()
+    i_cga = model.prefixindex.topdown()
     if not i_cga.goDown('CGA'[::-1]):
         raise ValueError('Should have been able to find prefix "CGA"')
     assert ([0,0,0,1] == t[i_cga.value.id]).all()
@@ -370,7 +370,7 @@ def test_model_predictions():
             #assert abs(.25 - model.predictive(x, u)) < 1e-15
         if False:  # Choose whether to build graph or not
             import seqan.io.graphtool
-            builder = seqan.io.graphtool.Builder(model.prefix_tree)
+            builder = seqan.io.graphtool.Builder(model.prefixindex)
             seqan.io.graphtool.GT.graph_draw(
                 builder.graph,
                 pos=seqan.io.graphtool.GT.sfdp_layout(builder.graph),

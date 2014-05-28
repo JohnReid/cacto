@@ -12,6 +12,7 @@ _logger = logging.getLogger(__name__)
 
 import numpy.random
 import math
+import seqan.descend
 import seqan
 from copy import copy
 from collections import defaultdict
@@ -36,18 +37,27 @@ def prefixfor(it):
     return str(it.representative)[::-1]
 
 
+def curtail(string, length=40):
+    """If the string is longer than length characters, shorten it and replace last
+    characters with ellipses."""
+    if len(string) > length:
+        return '{0}...'.format(string[:length-3])
+    else:
+        return string
+
+
 def make_prefix_index(seqs):
     "Make an index out of the reverse of the sequences."
     sequences = StringSet()
     for seq in seqs:
-        _logger.debug('Building prefix index from: %s', seq)
+        _logger.debug('Building prefix index from: %s', curtail(seq))
         sequences.appendValue(String(seq[::-1]))
     return ESA(sequences)
 
 
-def count_prefixes(prefix_tree, prefix_counts=None, i=None):
+def count_prefixes(prefixindex, prefix_counts=None, i=None):
     """Recursive function that counts how many times each
-    prefix occurs in the prefix_tree.
+    prefix occurs in the prefixindex.
 
     Complexity: O(n log(n)) where n is the length of the text
     """
@@ -57,17 +67,17 @@ def count_prefixes(prefix_tree, prefix_counts=None, i=None):
         prefix_counts = dict()
     # Use a root topdown iterator if none provided
     if i is None:
-        i = prefix_tree.topdown()
+        i = prefixindex.topdown()
     # Double-check all occurrences match
     assert [i.representative] * i.numOccurrences == \
-        [prefix_tree.text[occ.i1][occ.i2:occ.i2+i.repLength]
+        [prefixindex.text[occ.i1][occ.i2:occ.i2+i.repLength]
             for occ in i.occurrences]
     # Count how many occurrences match the whole string
     prefix_count = i.numOccurrences
-    copyi = copy(i)
+    copyi = i.copy()
     # Alternative calculation for prefix counts
     # alt_calculation = sum(imap(
-        # lambda occ: occ.i2 + i.repLength == len(prefix_tree.text[occ.i1]),
+        # lambda occ: occ.i2 + i.repLength == len(prefixindex.text[occ.i1]),
         # i.occurrences))
     # Recurse
     if i.goDown():
@@ -75,7 +85,7 @@ def count_prefixes(prefix_tree, prefix_counts=None, i=None):
             # Any occurrences in children do not match the whole string
             prefix_count -= i.numOccurrences
             # Recurse
-            count_prefixes(prefix_tree, prefix_counts, copy(i))
+            count_prefixes(prefixindex, prefix_counts, i.copy())
             if not i.goRight():
                 break
     # Update counts if any occurrences matched the whole string
@@ -89,12 +99,12 @@ def count_prefixes(prefix_tree, prefix_counts=None, i=None):
     return prefix_counts
 
 
-def count_contexts(prefix_tree):
+def count_contexts(prefixindex):
     """Count all the number of times each base is emitted in each context.
 
     Complexity: O(n log(n)) (I think)
     """
-    context_counts = numpy.zeros((2 * len(prefix_tree), Value.valueSize), dtype=int)
+    context_counts = numpy.zeros((2 * len(prefixindex), Value.valueSize), dtype=int)
     def countcontextsforprefix(prefix_i, count):
         # context is all but last symbol, reversed
         prefix = str(prefix_i.representative)[::-1]
@@ -108,13 +118,13 @@ def count_contexts(prefix_tree):
         #_logger.debug(u[::-1])
         #_logger.debug(str(prefix_i.representative)[1:])
         assert u[::-1] == str(prefix_i.representative)[1:]
-        u_i = prefix_tree.topdown()
+        u_i = prefixindex.topdown()
         # Check that we can descend the prefix tree to the correct context
         if not u_i.goDown(u[::-1]):
             raise ValueError('Could not descend context')
         if count:
             context_counts[u_i.value.id][x.ordValue] += count
-    seqan.findsuffixes(prefix_tree.topdown(), countcontextsforprefix)
+    seqan.findsuffixes(prefixindex.topdown(), countcontextsforprefix)
     return context_counts
 
 
@@ -128,23 +138,25 @@ class CactoModel(object):
     """
 
     def __init__(self, prefixtree):
-        self.prefix_tree = prefixtree
-        self.t = numpy.zeros((2 * len(self.prefix_tree), Value.valueSize), dtype=int)
-        self.s = numpy.zeros((2 * len(self.prefix_tree), Value.valueSize), dtype=int)
+        self.prefixindex = prefixtree
+        self.t = numpy.zeros((2 * len(self.prefixindex), Value.valueSize), dtype=int)
+        self.s = numpy.zeros((2 * len(self.prefixindex), Value.valueSize), dtype=int)
         self._initialise()
 
 
     def _initialise(self):
         """Initialise the table counts."""
-        s = count_contexts(self.prefix_tree)
-        def initialise_vertex(parent, it):
+        s = count_contexts(self.prefixindex)
+        def initialise_vertex(it):
             "Initialise the vertex the iterator points to."
             id_ = it.value.id
             for xord, count in enumerate(s[id_]):
                 for _ in xrange(count):
                     self._initialise_with(xord, copy(it))
                     self.s[id_,xord] += 1
-        seqan.CallbackDescender(initialise_vertex)(self.prefix_tree, history=True)
+        descender = seqan.descend.Descender()
+        descender.visitvertex = initialise_vertex
+        descender.descend(self.prefixindex.topdownhistory())
         assert (self.s == s).all()
 
 
@@ -170,9 +182,9 @@ class CactoModel(object):
     def _locate_context(self, u, topdownhistory=False):
         "Iterate down to the context u."
         if topdownhistory:
-            i = self.prefix_tree.topdownhistory()
+            i = self.prefixindex.topdownhistory()
         else:
-            i = self.prefix_tree.topdown()
+            i = self.prefixindex.topdown()
         i.goDown(u[::-1])
         return i
 
@@ -199,11 +211,11 @@ class CactoModel(object):
     def _tu_children(self, i):
         "Get the counts of tables in the children."
         result = numpy.zeros(Value.valueSize, dtype=int)
-        child = copy(i)
-        if child.goDown():
+        i = copy(i)
+        if i.goDown():
             while True:
-                result += self._tu(child)
-                if not child.goRight():
+                result += self._tu(i)
+                if not i.goRight():
                     break
         return result
 
@@ -222,6 +234,12 @@ class CactoModel(object):
         "Discount parameter for the context length."
         return 0.
 
+
+    def calculateposteriot(self):
+        """Calculate the posterior p(x|u) for all emissions x and contexts u.
+        Posterior is returned as a numpy array indexed by the vertex id of u
+        then the ordinal of base x."""
+        posterior = numpy.zeros((2 * len(self.prefixindex), Value.valueSize), dtype=int)
 
     def p_xord_given_ui(self, xord, i):
         """Recursive function to determine likelihood, p(x|u).
@@ -274,8 +292,6 @@ class CactoModel(object):
         # We should keep descending if we matched the whole of the
         # representative so far and there is more tree to descend
         # that matches at least part of the rest of u
-        #from IPython.core.debugger import Tracer
-        #Tracer()()
         if (
             i.repLength < len(u)
             and i.representative == u[:i.repLength]
@@ -290,7 +306,7 @@ class CactoModel(object):
     def p_xord_given_u(self, xord, u):
         "p(x|u) where u is the context and xord is the ordinal value of the next symbol"
         return self._p_xord_given_u(
-            self.prefix_tree.topdown(),
+            self.prefixindex.topdown(),
             xord,
             u,
             uniformovervalues)
@@ -304,20 +320,23 @@ class CactoModel(object):
         #_logger.debug('          : p_G(x=%s|u=%-15s) = %.3e', x, quote(u), p_x_given_u)
 
 
-    def seqsloglikelihood(self, seqs):
+    def seqsloglikelihood(self, seqs=None, seqsprefixindex=None):
         """The log likelihood of the sequences.
 
         The function builds a prefix tree of the sequences and counts how
         many emissions have been made for each context. Then the prefix
         tree is descended concurrently to the """
-        seqsprefixtree = make_prefix_index(seqs)
-        s = count_contexts(seqsprefixtree)
-        class LLDescender(seqan.ParallelDescender):
+        if (seqs is None) == (seqsprefixindex is None):
+            raise ValueError('Please specify exactly one of seqs or seqsprefixindex')
+        if seqsprefixindex is None:
+            seqsprefixindex = make_prefix_index(seqs)
+        s = count_contexts(seqsprefixindex)
+        class LLDescender(seqan.descend.ParallelDescender):
             def __init__(self_):
                 self_.ll = 0.
-            def _visit_node(self_, modelit, seqsit, stillsynced):
+            def visitvertex(self_, modelit, seqsit, stillsynced):
                 for xord, count in enumerate(s[seqsit.value.id]):
                     self_.ll += count * math.log(self.p_xord_given_ui(xord, copy(modelit)))
         descender = LLDescender()
-        descender.descend(self.prefix_tree.topdownhistory(), seqsprefixtree.topdownhistory())
+        descender.descend(self.prefixindex.topdownhistory(), seqsprefixindex.topdownhistory())
         return descender.ll
