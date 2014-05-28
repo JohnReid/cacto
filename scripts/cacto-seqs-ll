@@ -1,0 +1,60 @@
+#!/usr/bin/env python
+
+import logging
+FORMAT = '%(asctime)-15s:%(levelname)5s:%(message)s'
+logging.basicConfig(level=logging.INFO, format=FORMAT)
+
+import cacto
+import seqan
+import argparse
+import math
+import sys
+
+
+#
+# Parse the command line arguments
+#
+parser = argparse.ArgumentParser(
+    description='Calculate the log likelihood of sequences using the Cacto model.')
+parser.add_argument('training', metavar='TRAININGFASTA', type=str, nargs=1,
+                   help='Load the training sequences from TRAININGFASTA')
+parser.add_argument('test', metavar='TESTFASTA', type=str, nargs='+',
+                   help='Load the test sequences from TESTFASTA')
+args = parser.parse_args()
+
+
+#
+# Load the training sequences
+#
+trainingfasta = args.training[0]
+logging.info('Reading the training sequences from %s', trainingfasta)
+num_bases, trainingseqs, seqids = seqan.readFastaDNA(trainingfasta, reverse=True)
+logging.info('Read %d bases from %s', num_bases, trainingfasta)
+
+
+#
+# Create a model from the training sequences
+#
+logging.info('Building training sequences index')
+trainingindex = seqan.IndexStringDNASetESA(trainingseqs)
+logging.info('Building model')
+model = cacto.CactoModel(trainingindex)
+logging.info('Built model')
+#sys.exit(-1)
+
+
+#
+# Calculate the log likelihood for each set of test sequences
+#
+for testfasta in args.test:
+    logging.info('Reading test sequences from %s', testfasta)
+    num_test_bases, testseqs, test_seqids = seqan.readFastaDNA(testfasta, reverse=True)
+    logging.info('Read %d bases in %d sequences from %s',
+        num_test_bases, len(testseqs), trainingfasta)
+    testprefixindex = seqan.IndexStringDNASetESA(testseqs)
+    logging.info('Calculating test log likelihood')
+    ll = model.seqsloglikelihood(seqsprefixindex=testprefixindex)
+    logging.info('Log likelihood     : %.2e', ll)
+    logging.info('Log likelihood/base: %.2e', ll/num_test_bases)
+    logging.info('    likelihood/base: %.2e', math.exp(ll/num_test_bases))
+

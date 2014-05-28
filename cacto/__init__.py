@@ -154,6 +154,7 @@ class CactoModel(object):
                 for _ in xrange(count):
                     self._initialise_with(xord, copy(it))
                     self.s[id_,xord] += 1
+            return True
         descender = seqan.descend.Descender()
         descender.visitvertex = initialise_vertex
         descender.descend(self.prefixindex.topdownhistory())
@@ -211,12 +212,12 @@ class CactoModel(object):
     def _tu_children(self, i):
         "Get the counts of tables in the children."
         result = numpy.zeros(Value.valueSize, dtype=int)
-        i = copy(i)
         if i.goDown():
             while True:
                 result += self._tu(i)
                 if not i.goRight():
                     break
+            i.goUp()
         return result
 
 
@@ -235,11 +236,39 @@ class CactoModel(object):
         return 0.
 
 
-    def calculateposteriot(self):
+    def calculateposterior(self):
         """Calculate the posterior p(x|u) for all emissions x and contexts u.
         Posterior is returned as a numpy array indexed by the vertex id of u
         then the ordinal of base x."""
-        posterior = numpy.zeros((2 * len(self.prefixindex), Value.valueSize), dtype=int)
+        posterior = numpy.zeros((2 * len(self.prefixindex), Value.valueSize), dtype=float)
+        def visitvertex(it):
+            # What is the posterior for our parent node?
+            if it.isRoot:
+                # No: parent posterior is uniform distribution
+                parent_posterior = numpy.ones(Value.valueSize) * uniformovervalues
+            else:
+                # Yes: parent posterior has already been calculated
+                parent_posterior = posterior[it.nodeUp.id]
+            ulen = it.repLength
+            su = self._su(it)
+            tu = self._tu(it)
+            tu_children = self._tu_children(it)
+            du = self.d(ulen)
+            thetau = self.theta(ulen)
+            # Contribution from this node
+            posterior[it.value.id] = (
+                su + tu_children - du * tu
+                + (thetau + du * tu.sum()) * parent_posterior
+            ) / (
+                thetau + su.sum() + tu_children.sum()
+            )
+            # if it.representative == '': 1/0  # For debugging
+            return True
+        descender = seqan.descend.Descender()
+        descender.visitvertex = visitvertex
+        descender.descend(self.prefixindex.topdownhistory())
+        return posterior
+
 
     def p_xord_given_ui(self, xord, i):
         """Recursive function to determine likelihood, p(x|u).
@@ -306,7 +335,7 @@ class CactoModel(object):
     def p_xord_given_u(self, xord, u):
         "p(x|u) where u is the context and xord is the ordinal value of the next symbol"
         return self._p_xord_given_u(
-            self.prefixindex.topdown(),
+            self.prefixindex.topdownhistory(),
             xord,
             u,
             uniformovervalues)
@@ -337,6 +366,7 @@ class CactoModel(object):
             def visitvertex(self_, modelit, seqsit, stillsynced):
                 for xord, count in enumerate(s[seqsit.value.id]):
                     self_.ll += count * math.log(self.p_xord_given_ui(xord, copy(modelit)))
+                return True
         descender = LLDescender()
         descender.descend(self.prefixindex.topdownhistory(), seqsprefixindex.topdownhistory())
         return descender.ll

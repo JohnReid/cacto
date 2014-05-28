@@ -358,16 +358,30 @@ prediction_sets = (
 )
 
 
+def areclose(x1, x2):
+    return (x1 - x2) / (x1 + x2) * 2 < 1e-10
+
+
+def assertareclose(x1, x2):
+    assert areclose(x1, x2), '{0} and {1} are not close'.format(x1, x2)
+
+
 def test_model_predictions():
     import seqan
     for seqs, test_xs_us in prediction_sets:
         model = cacto.cactomodelfromseqs(seqs)
+        posterior = model.calculateposterior()
         for x, u in test_xs_us:
+            logging.debug('%s|%s', x, u)
             p = model.p_x_given_u(cacto.Value(x), u)
             i = model._locate_context(u, topdownhistory=True)
+            post = posterior[i.value.id]
             p2 = model.p_xord_given_ui(cacto.Value(x).ordValue, i)
-            assert (p - p2) / (p + p2) * 2 < 1e-10, '{0} and {1} are not close'.format(p, p2)
-            #assert abs(.25 - model.predictive(x, u)) < 1e-15
+            # Check that the three different methods of calculating likelihoods
+            # give similar results
+            assertareclose(p, p2)
+            assertareclose(p, post[cacto.Value(x).ordValue])
+            assertareclose(1., post.sum())  # Check posterior adds to 1
         if False:  # Choose whether to build graph or not
             import seqan.io.graphtool
             builder = seqan.io.graphtool.Builder(model.prefixindex)
