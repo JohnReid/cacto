@@ -16,6 +16,8 @@ import sys
 #
 parser = argparse.ArgumentParser(
     description='Calculate the log likelihood of sequences using the Cacto model.')
+parser.add_argument('--d', metavar='D', type=float, default=0.,
+                   help='Use D as the discount factor for the hierarchical model')
 parser.add_argument('training', metavar='TRAININGFASTA', type=str, nargs=1,
                    help='Load the training sequences from TRAININGFASTA')
 parser.add_argument('test', metavar='TESTFASTA', type=str, nargs='+',
@@ -39,7 +41,8 @@ logging.info('Building training sequences index')
 trainingindex = seqan.IndexStringDNASetESA(trainingseqs)
 logging.info('Building model')
 model = cacto.CactoModel(trainingindex)
-logging.info('Built model')
+logging.info('Calculating posterior')
+modelposterior = model.calculateposterior()
 #sys.exit(-1)
 
 
@@ -53,7 +56,7 @@ for testfasta in args.test:
         num_test_bases, len(testseqs), trainingfasta)
     testprefixindex = seqan.IndexStringDNASetESA(testseqs)
     logging.info('Calculating test log likelihood')
-    ll = model.seqsloglikelihood(seqsprefixindex=testprefixindex)
+    ll = model.seqsloglikelihood(seqsprefixindex=testprefixindex, modelposterior=modelposterior)
     logging.info('Log likelihood     : %.2e', ll)
     logging.info('Log likelihood/base: %.2e', ll/num_test_bases)
     logging.info('    likelihood/base: %.2e', math.exp(ll/num_test_bases))

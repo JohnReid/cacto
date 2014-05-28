@@ -410,7 +410,6 @@ def test_seqs_log_likelihood():
         for predictionseqs in prefix_seq_sets:
             logging.info('likelihood/base: %.3f',
                 math.exp(model.seqsloglikelihood(predictionseqs)/sum(map(len, predictionseqs))))
-    1/0
 
 
 if '__main__' == __name__:

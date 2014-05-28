@@ -137,7 +137,13 @@ class CactoModel(object):
     """A non-parametric sequence model.
     """
 
-    def __init__(self, prefixtree):
+    def __init__(self, prefixtree, theta=1., d=0.):
+        if 0 > d or d >= 1:
+            raise ValueError('d must satisfy 0 <= d < 1')
+        if theta <= -d:
+            raise ValueError('Theta must be > -d')
+        self._theta = theta
+        self._d = d
         self.prefixindex = prefixtree
         self.t = numpy.zeros((2 * len(self.prefixindex), Value.valueSize), dtype=int)
         self.s = numpy.zeros((2 * len(self.prefixindex), Value.valueSize), dtype=int)
@@ -228,12 +234,12 @@ class CactoModel(object):
 
     def theta(self, context_len):
         "Theta for the context length."
-        return 1.
+        return self._theta
 
 
     def d(self, context_len):
         "Discount parameter for the context length."
-        return 0.
+        return self._d
 
 
     def calculateposterior(self):
