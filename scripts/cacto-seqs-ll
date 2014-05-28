@@ -16,8 +16,10 @@ import sys
 #
 parser = argparse.ArgumentParser(
     description='Calculate the log likelihood of sequences using the Cacto model.')
+parser.add_argument('--theta', metavar='THETA', type=float, default=1.,
+                   help='Use THETA as the Pitman-Yor strength parameter in the hierarchical model')
 parser.add_argument('--d', metavar='D', type=float, default=0.,
-                   help='Use D as the discount factor for the hierarchical model')
+                   help='Use D as the Pitman-Yor discount parameter in the hierarchical model')
 parser.add_argument('training', metavar='TRAININGFASTA', type=str, nargs=1,
                    help='Load the training sequences from TRAININGFASTA')
 parser.add_argument('test', metavar='TESTFASTA', type=str, nargs='+',
@@ -40,7 +42,7 @@ logging.info('Read %d bases from %s', num_bases, trainingfasta)
 logging.info('Building training sequences index')
 trainingindex = seqan.IndexStringDNASetESA(trainingseqs)
 logging.info('Building model')
-model = cacto.CactoModel(trainingindex)
+model = cacto.CactoModel(trainingindex, d=args.d, theta=args.theta)
 logging.info('Calculating posterior')
 modelposterior = model.calculateposterior()
 #sys.exit(-1)
