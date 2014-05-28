@@ -349,23 +349,29 @@ class CactoModel(object):
         #_logger.debug('          : p_G(x=%s|u=%-15s) = %.3e', x, quote(u), p_x_given_u)
 
 
-    def seqsloglikelihood(self, seqs=None, seqsprefixindex=None):
+    def seqsloglikelihood(self, seqs=None, seqsprefixindex=None, modelposterior=None):
         """The log likelihood of the sequences.
 
         The function builds a prefix tree of the sequences and counts how
         many emissions have been made for each context. Then the prefix
         tree is descended concurrently to the """
+        if modelposterior is None:
+            modelposterior = self.calculateposterior()
         if (seqs is None) == (seqsprefixindex is None):
             raise ValueError('Please specify exactly one of seqs or seqsprefixindex')
         if seqsprefixindex is None:
             seqsprefixindex = make_prefix_index(seqs)
+        # The number of times each base is emitted in each context of the
+        # sequences
         s = count_contexts(seqsprefixindex)
         class LLDescender(seqan.descend.ParallelDescender):
+            "A descender that sums the log likelihood as it goes."
             def __init__(self_):
                 self_.ll = 0.
             def visitvertex(self_, modelit, seqsit, stillsynced):
-                for xord, count in enumerate(s[seqsit.value.id]):
-                    self_.ll += count * math.log(self.p_xord_given_ui(xord, copy(modelit)))
+                self_.ll += (
+                    s[seqsit.value.id]
+                    * numpy.log(modelposterior[modelit.value.id])).sum()
                 return True
         descender = LLDescender()
         descender.descend(self.prefixindex.topdownhistory(), seqsprefixindex.topdownhistory())
