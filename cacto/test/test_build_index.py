@@ -185,14 +185,16 @@ def test_count_contexts():
     for seqs in prefix_seq_sets:
         prefixindex = cacto.make_prefix_index(seqs)
         #cacto.log_prefixindex(prefixindex.topdown())
-        def logprefixcounts(parent, it):
+        def logprefixcounts(it):
             logger.debug('Prefix tree: "%s"', str(it.representative)[::-1])
-        #seqan.CallbackDescender(logprefixcounts)(prefixindex)
+            return True
+        #seqan.traverse.depthfirsttraversal(prefixindex, logprefixcounts)
         context_counts = cacto.count_contexts(prefixindex)
-        def logcontextcounts(parent, it):
+        def logcontextcounts(it):
             logger.debug('Context counts: %-10s: %s',
                 cacto.quote(cacto.prefixfor(it)), context_counts[it.value.id])
-        seqan.CallbackDescender(logcontextcounts)(prefixindex)
+            return True
+        seqan.traverse.depthfirsttraversal(prefixindex, logcontextcounts)
         desired_counts = build_desired_context_counts(seqs)
         for context, counts in desired_counts.iteritems():
             logger.debug('Desired counts: %-10s: %s', cacto.quote(context), counts)
@@ -228,7 +230,7 @@ def test_simple_model_initialisation_2():
 def test_model_initialisation_1():
     """Test how the table counts are initialised."""
     model = cacto.cactomodelfromseqs(('CGAT',))
-    seqan.CallbackDescender(model.log_table_counts)(model.prefixindex)
+    seqan.traverse.depthfirsttraversal(model.prefixindex, model.log_table_counts)
     t = model.t.copy()
     i_cga = model.prefixindex.topdown()
     if not i_cga.goDown('CGA'[::-1]):

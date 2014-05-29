@@ -12,7 +12,7 @@ _logger = logging.getLogger(__name__)
 
 import numpy.random
 import math
-import seqan.descend
+import seqan.traverse
 import seqan
 from copy import copy
 from collections import defaultdict
@@ -161,9 +161,7 @@ class CactoModel(object):
                     self._initialise_with(xord, copy(it))
                     self.s[id_,xord] += 1
             return True
-        descender = seqan.descend.Descender()
-        descender.visitvertex = initialise_vertex
-        descender.descend(self.prefixindex.topdownhistory())
+        seqan.traverse.depthfirsttraversal(self.prefixindex, initialise_vertex)
         assert (self.s == s).all()
 
 
@@ -196,18 +194,20 @@ class CactoModel(object):
         return i
 
 
-    def log_context_counts(self, parent, it):
-        """Visitor function to be used in callback descender
+    def log_context_counts(self, it):
+        """Visitor function to be used in traversal
         to log context counts."""
         _logger.debug('Context counts: %-10s: %s',
             quote(prefixfor(it)), self.s[it.value.id])
+        return True
 
 
-    def log_table_counts(self, parent, it):
-        """Visitor function to be used in callback descender
+    def log_table_counts(self, it):
+        """Visitor function to be used in traversal
         to log table counts."""
         _logger.debug('Table counts: %-10s: %s',
                       quote(prefixfor(it)), self.t[it.value.id])
+        return True
 
 
     def _tu(self, i):
@@ -268,11 +268,8 @@ class CactoModel(object):
             ) / (
                 thetau + su.sum() + tu_children.sum()
             )
-            # if it.representative == '': 1/0  # For debugging
             return True
-        descender = seqan.descend.Descender()
-        descender.visitvertex = visitvertex
-        descender.descend(self.prefixindex.topdownhistory())
+        seqan.traverse.topdownhistorytraversal(self.prefixindex.topdownhistory(), visitvertex)
         return posterior
 
 
@@ -370,15 +367,17 @@ class CactoModel(object):
         # The number of times each base is emitted in each context of the
         # sequences
         s = count_contexts(seqsprefixindex)
-        class LLDescender(seqan.descend.ParallelDescender):
-            "A descender that sums the log likelihood as it goes."
-            def __init__(self_):
-                self_.ll = 0.
-            def visitvertex(self_, modelit, seqsit, stillsynced):
-                self_.ll += (
+        class Visitor(object):
+            def __init__(self):
+                self.ll = 0.
+            def __call__(self, modelit, seqsit, stillsynced):
+                self.ll += (
                     s[seqsit.value.id]
                     * numpy.log(modelposterior[modelit.value.id])).sum()
                 return True
-        descender = LLDescender()
-        descender.descend(self.prefixindex.topdownhistory(), seqsprefixindex.topdownhistory())
-        return descender.ll
+        visitor = Visitor()
+        seqan.traverse.topdownparalleltraversal(
+            self.prefixindex.topdownhistory(),
+            seqsprefixindex.topdownhistory(),
+            visitor)
+        return visitor.ll
